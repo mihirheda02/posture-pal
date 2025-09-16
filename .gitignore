@@ -1,0 +1,52 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.so
+*.pyd
+*.dll
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Virtual environment
+venv/
+.env/
+ENV/
+
+# VS Code settings
+.vscode/
+
+# Test and coverage reports
+htmlcov/
+.coverage
+.tox/
+
+# Model files
+models/*.task
+models/*.onnx
+models/*.pb
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# MediaPipe cache
+mediapipe_cache/
+
+# OpenCV build files
+build/
+
+# Misc
+*.swp
+*.bak
+
+# Ignore data/output folders
+output/
+data/
+
+# Ignore pip wheel files
+*.whl

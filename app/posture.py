@@ -158,7 +158,7 @@ class PostureAnalyzer:
         
         # Calculate shoulder slope angle (for backward compatibility)
         shoulder_slope = abs(shoulder_height_diff)
-        if abs(left_shoulder[0] - right_shoulder[0]) > 0:
+        if (left_shoulder[0] - right_shoulder[0]) != 0:
             shoulder_angle = np.degrees(np.arctan(shoulder_slope / abs(left_shoulder[0] - right_shoulder[0])))
         else:
             shoulder_angle = 0
