@@ -12,6 +12,7 @@ import time
 @dataclass
 class PostureMetrics:
     head_forward_angle: float
+    head_tilt_angle: float
     back_straightness: float
     confidence: float
     timestamp: float
@@ -68,13 +69,14 @@ class PostureAnalyzer:
         return np.sqrt((point1[0] - point2[0])**2 + (point1[1] - point2[1])**2)
     
     def _analyze_head_position(self, landmarks) -> Tuple[float, List[str]]:
-        """Analyze head forward posture"""
+        """Analyze head posture"""
         issues = []
         
         left_ear = (landmarks[7].x, landmarks[7].y)
         left_shoulder = (landmarks[11].x, landmarks[11].y)
+        left_eye = (landmarks[3].x, landmarks[3].y)
         
-        # Calculate head forward angle
+        # Calculate head forward/backward angle
         # Create a vertical line from shoulder upwards
         vertical_point = (left_shoulder[0], left_ear[1])
         head_forward_angle = self._calculate_angle(vertical_point, left_shoulder, left_ear)
@@ -83,10 +85,20 @@ class PostureAnalyzer:
             issues.append("Head too far forward")
             print(f"Debug: head_forward_angle={head_forward_angle}")
         elif head_forward_angle < self.good_head_angle_range[0]:
-            issues.append("Head tilted back")
+            issues.append("Head too far backward")
             print(f"Debug: head_forward_angle={head_forward_angle}")
+
+        head_tilt_angle = self.calculate_angle(left_eye, left_ear, (left_eye[0], left_ear[1]))
+
+        if head_tilt_angle > 10:
+            if left_eye[1] > left_ear[1]:
+                issues.append("Head tilted back")
+                print(f"Debug: head_tilt_angle={head_tilt_angle}")
+            else:
+                issues.append("Head tilted forward")
+                print(f"Debug: head_tilt_angle={head_tilt_angle}")
             
-        return head_forward_angle, issues
+        return head_forward_angle, head_tilt_angle, issues
     
     def _analyze_back_straightness(self, landmarks) -> Tuple[float, List[str]]:
         """Analyze back straightness"""
@@ -140,7 +152,7 @@ class PostureAnalyzer:
             return None
         
         # Calculate posture metrics
-        head_angle, head_issues = self._analyze_head_position(landmarks)
+        head_forward_angle, head_tilt_angle, head_issues = self._analyze_head_position(landmarks)
         back_angle, back_issues = self._analyze_back_straightness(landmarks)
         
         # Combine all issues
@@ -151,7 +163,8 @@ class PostureAnalyzer:
         confidence = visible_landmarks / len(landmarks)
         
         metrics = PostureMetrics(
-            head_forward_angle=head_angle,
+            head_forward_angle=head_forward_angle,
+            head_tilt_angle=head_tilt_angle,
             back_straightness=back_angle,
             confidence=confidence,
             timestamp=time.time(),

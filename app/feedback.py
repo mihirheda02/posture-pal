@@ -34,46 +34,24 @@ class PostureFeedbackSystem:
                     "Take regular breaks to do neck stretches and resets."
                 ]
             },
+            "Head too far backward": {
+                "corrections": [
+
+                ]
+            },
+            "Head tilted forward": {
+                "corrections": [
+
+                ],
+                "tips": [
+                    
+                ]
+            },
             "Head tilted back": {
                 "corrections": [
                     "Gently lower your chin and bring your head forward slightly.",
                     "Relax your neck and let your head find a neutral position.",
                     "Check if your screen is too low - this might be causing you to tilt back."
-                ]
-            },
-            "Right shoulder elevated": {
-                "corrections": [
-                    "Lower your right shoulder and take a deep breath to relax.",
-                    "Roll your right shoulder backward and down several times.",
-                    "Check if your right armrest is too high or if you're tensing up."
-                ],
-                "tips": [
-                    "Make sure both armrests are at the same height.",
-                    "Consider if you're favoring one side due to mouse usage."
-                ]
-            },
-            "Left shoulder elevated": {
-                "corrections": [
-                    "Lower your left shoulder and take a deep breath to relax.",
-                    "Roll your left shoulder backward and down several times.",
-                    "Check if your left armrest is too high or if you're tensing up."
-                ],
-                "tips": [
-                    "Make sure both armrests are at the same height.",
-                    "Pay attention to whether you're leaning on one elbow more than the other."
-                ]
-            },
-            "Shoulders rounded forward": {
-                "corrections": [
-                    "Pull your shoulder blades back and down, opening up your chest.",
-                    "Imagine squeezing a pencil between your shoulder blades.",
-                    "Roll your shoulders up, back, and down to reset their position.",
-                    "Take a deep breath and let your chest expand naturally."
-                ],
-                "tips": [
-                    "Strengthen your upper back muscles with simple exercises.",
-                    "Be mindful of how you position your arms while typing.",
-                    "Consider a ergonomic chair that supports proper shoulder alignment."
                 ]
             },
             "Leaning forward": {
@@ -138,14 +116,14 @@ class PostureFeedbackSystem:
         feedback_messages = []
         
         # Track consecutive bad posture
-        if posture_score < 70:
+        if posture_score < 7:
             if self.last_posture_good:
                 self.consecutive_bad_posture_count = 1
             else:
                 self.consecutive_bad_posture_count += 1
             self.last_posture_good = False
         else:
-            if not self.last_posture_good and posture_score > 80:
+            if not self.last_posture_good and posture_score > 8:
                 # Improved posture - give encouragement
                 feedback_messages.append(FeedbackMessage(
                     message=random.choice(self.encouragement_messages),
@@ -191,7 +169,7 @@ class PostureFeedbackSystem:
             ))
         
         # General tips occasionally when posture is good
-        elif posture_score > 80 and random.random() < 0.1:
+        elif posture_score > 8 and random.random() < 0.1:
             tip_msg = random.choice(self.general_tips)
             feedback_messages.append(FeedbackMessage(
                 message=tip_msg,
@@ -215,13 +193,13 @@ class PostureFeedbackSystem:
     
     def get_posture_status_message(self, posture_score: float) -> str:
         """Get a general status message based on posture score"""
-        if posture_score >= 90:
+        if posture_score >= 9:
             return "Excellent posture!"
-        elif posture_score >= 80:
+        elif posture_score >= 8:
             return "Good posture!"
-        elif posture_score >= 70:
+        elif posture_score >= 7:
             return "Fair posture - minor adjustments needed."
-        elif posture_score >= 60:
+        elif posture_score >= 6:
             return "Poor posture - needs attention."
         else:
             return "Very poor posture - immediate correction recommended."
@@ -229,7 +207,7 @@ class PostureFeedbackSystem:
     def get_smart_suggestion(self, issues: List[str], posture_score: float) -> str:
         """Generate a smart, contextual suggestion"""
         if not issues:
-            if posture_score > 85:
+            if posture_score > 8.5:
                 return random.choice([
                     "You're doing great! Keep maintaining this excellent posture.",
                     "Perfect posture! Remember to take a movement break soon.",
