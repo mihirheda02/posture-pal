@@ -80,18 +80,13 @@ class PosturePalTestApp:
         cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
         
         # Posture score
-        score_color = (0, 255, 0) if posture_score >= 80 else (0, 255, 255) if posture_score >= 60 else (0, 0, 255)
-        cv2.putText(frame, f"Posture Score: {posture_score:.1f}/100", (20, 35), 
+        score_color = (0, 255, 0) if posture_score >= 8 else (0, 255, 255) if posture_score >= 6 else (0, 0, 255)
+        cv2.putText(frame, f"Posture Score: {posture_score:.1f}/10", (20, 35), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, score_color, 2)
         
         # Status
-        is_calibrated, frames_collected, total_frames = self.posture_analyzer.get_calibration_status()
-        if not is_calibrated:
-            status = f"Calibrating... ({frames_collected}/{total_frames})"
-            status_color = (0, 255, 255)  # Yellow during calibration
-        else:
-            status = self.feedback_system.get_posture_status_message(posture_score)
-            status_color = (255, 255, 255)  # White when calibrated
+        status = self.feedback_system.get_posture_status_message(posture_score)
+        status_color = (255, 255, 255)
             
         cv2.putText(frame, f"Status: {status}", (20, 65), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, status_color, 2)
@@ -150,6 +145,11 @@ class PosturePalTestApp:
         """Process a single frame and return posture metrics"""
         # Analyze posture
         metrics = self.posture_analyzer.analyze_frame(frame)
+
+        current_time = time.time()
+        # log metrics every 3 seconds
+        if current_time % 3 < 0.1:
+            self.logger.info(f"Metrics: {metrics}")
         
         if metrics is None or metrics.confidence < 0.5:  # Lowered threshold
             return None, 50, []
@@ -246,10 +246,6 @@ def main():
     print("• Visual posture score and issue detection")
     print("• Text-based feedback suggestions")
     print("• No speech (test mode)")
-    print("\nCalibration:")
-    print("• Please sit in your NORMAL posture for the first 60 frames")
-    print("• The system will learn your camera setup and baseline posture")
-    print("• Avoid exaggerated movements during calibration")
     print("\nControls:")
     print("• 'q' - Quit application")
     print("=" * 60)
