@@ -7,6 +7,7 @@ import math
 from typing import List, Tuple, Optional, Dict
 from dataclasses import dataclass
 import time
+from config import AppConfig, load_config
 
 
 @dataclass
@@ -20,14 +21,11 @@ class PostureMetrics:
 
 
 class PostureAnalyzer:
-    def __init__(self, model_path: str = "models/pose_landmarker_heavy.task"):
+    def __init__(self, model_path: str = "models/pose_landmarker_heavy.task", config: Optional[AppConfig] = None):
         self.model_path = model_path
+        self.config = config or load_config()
         self._detector = None
         self._init_detector()
-        
-        # Reference angles for good posture (in degrees)
-        self.good_head_angle_range = (0, 22)  # Slight forward is normal
-        self.good_back_angle_threshold = (-4, 9)
         
         # History for temporal analysis
         self.posture_history = []
@@ -35,15 +33,17 @@ class PostureAnalyzer:
         
     def _init_detector(self):
         base_options = python.BaseOptions(model_asset_path=self.model_path)
+        
+        # Use configurable confidence thresholds
+        thresholds = self.config.posture_thresholds
         options = vision.PoseLandmarkerOptions(
             base_options=base_options,
-            running_mode=vision.RunningMode.IMAGE,  # Changed from LIVE_STREAM for real-time
+            running_mode=vision.RunningMode.IMAGE,
             num_poses=1,
-            min_pose_detection_confidence=0.4,  # Lowered from 0.5
-            min_pose_presence_confidence=0.4,   # Lowered from 0.5
-            min_tracking_confidence=0.4,        # Lowered from 0.5
+            min_pose_detection_confidence=thresholds.pose_detection_confidence,
+            min_pose_presence_confidence=thresholds.pose_presence_confidence,
+            min_tracking_confidence=thresholds.pose_tracking_confidence,
             output_segmentation_masks=False
-            # Removed result_callback for synchronous processing
         )
         self._detector = vision.PoseLandmarker.create_from_options(options)
         self._latest_result = None
@@ -68,35 +68,34 @@ class PostureAnalyzer:
         """Calculate Euclidean distance between two points"""
         return np.sqrt((point1[0] - point2[0])**2 + (point1[1] - point2[1])**2)
     
-    def _analyze_head_position(self, landmarks) -> Tuple[float, List[str]]:
+    def _analyze_head_position(self, landmarks) -> Tuple[float, float, List[str]]:
         """Analyze head posture"""
         issues = []
         
         left_ear = (landmarks[7].x, landmarks[7].y)
         left_shoulder = (landmarks[11].x, landmarks[11].y)
-        left_eye = (landmarks[3].x, landmarks[3].y)
+        nose = (landmarks[0].x, landmarks[0].y)
         
         # Calculate head forward/backward angle
         # Create a vertical line from shoulder upwards
         vertical_point = (left_shoulder[0], left_ear[1])
         head_forward_angle = self._calculate_angle(vertical_point, left_shoulder, left_ear)
         
-        if head_forward_angle > self.good_head_angle_range[1]:
+        # Use simplified thresholds for head forward/backward position
+        thresholds = self.config.posture_thresholds
+        if head_forward_angle > thresholds.head_forward_threshold:
             issues.append("Head too far forward")
-            print(f"Debug: head_forward_angle={head_forward_angle}")
-        elif head_forward_angle < self.good_head_angle_range[0]:
-            issues.append("Head too far backward")
-            print(f"Debug: head_forward_angle={head_forward_angle}")
 
-        head_tilt_angle = self.calculate_angle(left_eye, left_ear, (left_eye[0], left_ear[1]))
+        # Calculate head tilt angle
+        head_tilt_angle = self._calculate_angle(nose, left_ear, (nose[0], left_ear[1]))
 
-        if head_tilt_angle > 10:
-            if left_eye[1] > left_ear[1]:
-                issues.append("Head tilted back")
-                print(f"Debug: head_tilt_angle={head_tilt_angle}")
-            else:
+        # Use simplified thresholds for head tilt
+        if nose[1] > left_ear[1]:  # Head tilted forward
+            if head_tilt_angle > thresholds.head_tilt_forward_threshold:
                 issues.append("Head tilted forward")
-                print(f"Debug: head_tilt_angle={head_tilt_angle}")
+        elif nose[1] < left_ear[1]:  # Head tilted back
+            if head_tilt_angle > thresholds.head_tilt_back_threshold:
+                issues.append("Head tilted back")
             
         return head_forward_angle, head_tilt_angle, issues
     
@@ -121,11 +120,16 @@ class PostureAnalyzer:
             cos_angle = np.clip(cos_angle, -1, 1)
             back_angle = np.degrees(np.arccos(cos_angle))
         
-        if left_shoulder[0] > left_hip[0] and back_angle > self.good_back_angle_threshold[1]:
-            issues.append("Leaning forward")
-        elif left_shoulder[0] < left_hip[0] and back_angle > self.good_back_angle_threshold[1]:
+        # Use simplified thresholds for back position
+        thresholds = self.config.posture_thresholds
+        
+        if left_shoulder[0] > left_hip[0]:  # Leaning forward
+            if back_angle > thresholds.back_angle_forward_threshold:
+                issues.append("Leaning forward")
+        elif left_shoulder[0] < left_hip[0]:  # Leaning backward
             back_angle = -back_angle  # Negative angle for leaning backward
-            issues.append("Leaning backward")
+            if back_angle < thresholds.back_angle_backward_threshold:
+                issues.append("Leaning backward")
                 
         return back_angle, issues
     
@@ -147,8 +151,8 @@ class PostureAnalyzer:
         landmarks = self._latest_result.pose_landmarks[0]
         
         # Check if we have enough visible landmarks
-        visible_landmarks = sum(1 for lm in landmarks if lm.visibility > 0.3)
-        if visible_landmarks < 10:  # Need at least 10 visible landmarks
+        visible_landmarks = sum(1 for lm in landmarks if lm.visibility > 0.4)
+        if visible_landmarks < 8:  # Lowered for better detection
             return None
         
         # Calculate posture metrics
@@ -159,8 +163,7 @@ class PostureAnalyzer:
         all_issues = head_issues + back_issues
         
         # Calculate overall confidence (based on landmark visibility)
-        visible_landmarks = sum(1 for lm in landmarks if lm.visibility > 0.5)
-        confidence = visible_landmarks / len(landmarks)
+        confidence = visible_landmarks / len(landmarks)  # Use consistent threshold
         
         metrics = PostureMetrics(
             head_forward_angle=head_forward_angle,
@@ -179,44 +182,52 @@ class PostureAnalyzer:
         return metrics
     
     def get_posture_score(self) -> float:
-        """Calculate overall posture score (0-10)"""
+        """Calculate overall posture score using simplified scoring system"""
         if not self.posture_history:
-            return 5
+            return self.config.scoring_settings.max_score / 2  # Default to middle score
             
-        recent_metrics = self.posture_history[-10:]  # Last 10 frames
+        # Use configurable number of frames for averaging
+        num_frames = min(len(self.posture_history), self.config.scoring_settings.history_frames)
+        recent_metrics = self.posture_history[-num_frames:]
         
         total_score = 0
+        scoring = self.config.scoring_settings
+        thresholds = self.config.posture_thresholds
+        
         for metrics in recent_metrics:
-            score = 10
+            score = scoring.max_score  # Start with maximum score
             
-            # Deduct points for head position
-            if metrics.head_forward_angle > 25:
-                score -= 4
-            elif metrics.head_forward_angle > 20:
-                score -= 1
+            # Deduct points for head position issues (simplified - only major penalties)
+            issues = metrics.issues
+            if "Head too far forward" in issues:
+                score -= scoring.head_forward_penalty
                 
-            # Deduct points for back straightness forward
-            if metrics.back_straightness > 9:
-                score -= 3
-            elif metrics.back_straightness > 6:
-                score -= 2
-
-            # Deduct points for back straightness backward
-            if metrics.back_straightness < -4:
-                score -= 3
-            elif metrics.back_straightness < -2:
-                score -= 2
+            # Deduct points for head tilt issues
+            if "Head tilted forward" in issues:
+                score -= scoring.head_tilt_forward_penalty
+            elif "Head tilted back" in issues:
+                score -= scoring.head_tilt_back_penalty
+                
+            # Deduct points for back posture issues
+            if "Leaning forward" in issues:
+                score -= scoring.back_forward_penalty
+            elif "Leaning backward" in issues:
+                score -= scoring.back_backward_penalty
                 
             # Deduct points for low confidence
-            if metrics.confidence < 0.6:
-                score -= 1
+            if metrics.confidence < thresholds.pose_confidence_threshold:
+                score -= scoring.low_confidence_penalty
                 
-            total_score += max(0, score)
+            # Ensure score doesn't go below minimum
+            score = max(scoring.min_score, score)
+            total_score += score
             
         return total_score / len(recent_metrics)
     
-    def is_bad_posture(self, threshold: float = 7) -> bool:
+    def is_bad_posture(self, threshold: Optional[float] = None) -> bool:
         """Check if current posture is considered bad"""
+        if threshold is None:
+            threshold = self.config.scoring_settings.bad_posture_threshold
         return self.get_posture_score() < threshold
     
     def get_current_issues(self) -> List[str]:

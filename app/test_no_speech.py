@@ -5,7 +5,8 @@ import logging
 import traceback
 
 from posture import PostureAnalyzer
-from feedback import PostureFeedbackSystem
+from feedback import PostureFeedback
+from config import load_config
 
 
 class PosturePalTestApp:
@@ -43,12 +44,18 @@ class PosturePalTestApp:
         self.logger.info("Initializing Posture Pal Test Mode...")
         
         try:
-            # Initialize posture analyzer
-            self.posture_analyzer = PostureAnalyzer()
+            # Load configuration
+            self.config = load_config()
+            
+            self.logger.info(f"Scoring system: 0-{self.config.scoring_settings.max_score}")
+            self.logger.info("Configuration loaded")
+            
+            # Initialize posture analyzer with config
+            self.posture_analyzer = PostureAnalyzer(config=self.config)
             self.logger.info("Posture analyzer initialized")
             
             # Initialize feedback system
-            self.feedback_system = PostureFeedbackSystem()
+            self.feedback_system = PostureFeedback()
             self.logger.info("Feedback system initialized")
             
             # Initialize camera
@@ -79,9 +86,11 @@ class PosturePalTestApp:
         cv2.rectangle(overlay, (10, 10), (w-10, 150), (0, 0, 0), -1)
         cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
         
-        # Posture score
-        score_color = (0, 255, 0) if posture_score >= 8 else (0, 255, 255) if posture_score >= 6 else (0, 0, 255)
-        cv2.putText(frame, f"Posture Score: {posture_score:.1f}/10", (20, 35), 
+        # Posture score with configurable max score
+        max_score = self.config.scoring_settings.max_score
+        good_threshold = self.config.scoring_settings.bad_posture_threshold
+        score_color = (0, 255, 0) if posture_score >= good_threshold else (0, 255, 255) if posture_score >= good_threshold * 0.7 else (0, 0, 255)
+        cv2.putText(frame, f"Posture Score: {posture_score:.1f}/{max_score:.0f}", (20, 35), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, score_color, 2)
         
         # Status
@@ -151,7 +160,7 @@ class PosturePalTestApp:
         if current_time % 3 < 0.1:
             self.logger.info(f"Metrics: {metrics}")
         
-        if metrics is None or metrics.confidence < 0.5:  # Lowered threshold
+        if metrics is None or metrics.confidence < 0.4:  # Lowered threshold
             return None, 50, []
         
         # Get posture score and issues

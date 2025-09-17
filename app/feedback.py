@@ -8,11 +8,11 @@ from posture import PostureMetrics
 @dataclass
 class FeedbackMessage:
     message: str
-    priority: int  # 1-5, higher is more urgent
-    category: str  # "correction", "encouragement", "tip", "warning"
+    priority: int
+    category: str = "correction"  # "correction", "tip", "warning"
 
 
-class PostureFeedbackSystem:
+class PostureFeedback:
     def __init__(self):
         self.last_feedback_time = 0
         self.feedback_history = []
@@ -24,9 +24,7 @@ class PostureFeedbackSystem:
             "Head too far forward": {
                 "corrections": [
                     "Pull your chin back and imagine a string pulling the top of your head up.",
-                    "Tuck your chin slightly and align your ears over your shoulders.",
-                    "Think about making a double chin - this helps retract your head position.",
-                    "Imagine you're holding a tennis ball between your chin and chest."
+                    "Tuck your chin slightly and align your ears over your shoulders."
                 ],
                 "tips": [
                     "Place a sticky note on your monitor as a reminder to check your head position.",
@@ -36,22 +34,27 @@ class PostureFeedbackSystem:
             },
             "Head too far backward": {
                 "corrections": [
-
+                    "Bring your head slightly forward to align ears over shoulders.",
+                    "Relax your neck and find a neutral head position."
                 ]
             },
             "Head tilted forward": {
                 "corrections": [
-
+                    "Lift your chin up and look straight ahead at your monitor.",
+                    "Raise your monitor height so you don't need to look down.",
+                    "Sit up tall and elongate your neck.",
+                    "Adjust your chair height to bring your eye level up."
                 ],
                 "tips": [
-                    
+                    "Place books or a monitor stand under your screen to raise it.",
+                    "Check that your screen top is at or slightly below eye level."
                 ]
             },
             "Head tilted back": {
                 "corrections": [
                     "Gently lower your chin and bring your head forward slightly.",
                     "Relax your neck and let your head find a neutral position.",
-                    "Check if your screen is too low - this might be causing you to tilt back."
+                    "Check if your screen is too high - this might be causing you to tilt back."
                 ]
             },
             "Leaning forward": {
@@ -63,8 +66,7 @@ class PostureFeedbackSystem:
                 ],
                 "tips": [
                     "Adjust your chair so you can sit back while still reaching your keyboard.",
-                    "Use a lumbar support pillow if your chair doesn't provide enough support.",
-                    "Keep frequently used items within easy reach to avoid leaning."
+                    "Use a lumbar support pillow if your chair doesn't provide enough support."
                 ]
             },
             "Leaning backward": {

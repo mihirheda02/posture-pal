@@ -8,13 +8,42 @@ import logging
 @dataclass
 class PostureThresholds:
     """Posture detection thresholds"""
-    good_head_angle_min: float = 5.0
-    good_head_angle_max: float = 15.0
-    max_head_forward_angle: float = 25.0
-    max_shoulder_angle: float = 10.0
-    max_back_angle: float = 15.0
-    rounded_shoulder_threshold: float = 0.05
-    pose_confidence_threshold: float = 0.7
+    # MediaPipe confidence thresholds (standardized)
+    pose_detection_confidence: float = 0.5      # Pose detection confidence
+    pose_presence_confidence: float = 0.5       # Pose presence confidence  
+    pose_tracking_confidence: float = 0.5       # Pose tracking confidence
+    pose_confidence_threshold: float = 0.6      # Minimum confidence for scoring
+    
+    # Head tilt thresholds (degrees) - only major thresholds
+    head_tilt_forward_threshold: float = 40.0   # Forward tilt threshold
+    head_tilt_back_threshold: float = 5.0       # Backward tilt threshold
+    
+    # Back angle thresholds (degrees) - only major thresholds  
+    back_angle_forward_threshold: float = 12.0  # Forward lean threshold
+    back_angle_backward_threshold: float = -3.0 # Backward lean threshold
+    
+    # Head forward angle thresholds (degrees) - only major thresholds
+    head_forward_threshold: float = 22.0        # Forward head threshold
+
+
+@dataclass 
+class ScoringSettings:
+    """Posture scoring configuration"""
+    # Base scoring system
+    max_score: float = 10.0                    # Maximum possible score
+    min_score: float = 0.0                     # Minimum possible score
+    
+    # Simplified penalties (only major issues penalized)
+    head_forward_penalty: float = 3.0          # Penalty for head too far forward
+    head_tilt_forward_penalty: float = 2.0     # Penalty for head tilted forward
+    head_tilt_back_penalty: float = 2.0        # Penalty for head tilted backward
+    back_forward_penalty: float = 2.5          # Penalty for leaning forward
+    back_backward_penalty: float = 2.0         # Penalty for leaning backward
+    low_confidence_penalty: float = 0.5        # Penalty for low pose confidence
+    
+    # Scoring behavior
+    bad_posture_threshold: float = 7.0         # Score below this is "bad posture"
+    history_frames: int = 10                   # Number of frames to average for score
 
 
 @dataclass
@@ -53,6 +82,7 @@ class SpeechSettings:
 class AppConfig:
     """Main application configuration"""
     posture_thresholds: PostureThresholds
+    scoring_settings: ScoringSettings
     feedback_settings: FeedbackSettings
     display_settings: DisplaySettings
     speech_settings: SpeechSettings
@@ -83,6 +113,7 @@ class ConfigManager:
         """Create default configuration"""
         return AppConfig(
             posture_thresholds=PostureThresholds(),
+            scoring_settings=ScoringSettings(),
             feedback_settings=FeedbackSettings(),
             display_settings=DisplaySettings(),
             speech_settings=SpeechSettings()
@@ -183,6 +214,12 @@ class ConfigManager:
                 if hasattr(config.posture_thresholds, key):
                     setattr(config.posture_thresholds, key, value)
         
+        # Update scoring settings
+        if 'scoring_settings' in config_dict:
+            for key, value in config_dict['scoring_settings'].items():
+                if hasattr(config.scoring_settings, key):
+                    setattr(config.scoring_settings, key, value)
+        
         # Update feedback settings
         if 'feedback_settings' in config_dict:
             for key, value in config_dict['feedback_settings'].items():
@@ -218,6 +255,12 @@ class ConfigManager:
             if hasattr(self.config.posture_thresholds, key):
                 setattr(self.config.posture_thresholds, key, value)
     
+    def update_scoring_settings(self, **kwargs):
+        """Update scoring settings"""
+        for key, value in kwargs.items():
+            if hasattr(self.config.scoring_settings, key):
+                setattr(self.config.scoring_settings, key, value)
+    
     def update_feedback_settings(self, **kwargs):
         """Update feedback settings"""
         for key, value in kwargs.items():
@@ -235,8 +278,18 @@ class ConfigManager:
             # Validate posture thresholds
             pt = self.config.posture_thresholds
             assert 0 < pt.pose_confidence_threshold <= 1, "pose_confidence_threshold must be between 0 and 1"
-            assert pt.good_head_angle_min < pt.good_head_angle_max, "Invalid head angle range"
-            assert pt.max_head_forward_angle > 0, "max_head_forward_angle must be positive"
+            
+            # Validate scoring settings
+            sc = self.config.scoring_settings
+            assert sc.max_score > sc.min_score, "max_score must be greater than min_score"
+            assert sc.max_score > 0, "max_score must be positive"
+            assert sc.bad_posture_threshold <= sc.max_score, "bad_posture_threshold must be <= max_score"
+            assert sc.history_frames > 0, "history_frames must be positive"
+            assert all(penalty >= 0 for penalty in [
+                sc.head_forward_penalty, sc.head_tilt_forward_penalty, 
+                sc.head_tilt_back_penalty, sc.back_forward_penalty,
+                sc.back_backward_penalty, sc.low_confidence_penalty
+            ]), "All penalties must be non-negative"
             
             # Validate feedback settings
             fs = self.config.feedback_settings
