@@ -1,7 +1,9 @@
 import random
 import time
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass
+from collections import defaultdict, deque
+import logging
 from posture import PostureMetrics
 
 
@@ -9,9 +11,19 @@ from posture import PostureMetrics
 class FeedbackMessage:
     message: str
     priority: int
-    category: str = "correction"  # "correction", "tip", "warning"
+    category: str = "correction"  # "correction", "tip", "warning", "llm_generated"
 
 
+@dataclass
+class IssueMetrics:
+    """Track metrics for a specific posture issue"""
+    issue_name: str
+    head_angle: float
+    spine_angle: float
+    confidence: float
+    timestamp: float
+    
+    
 class PostureFeedback:
     def __init__(self):
         self.last_feedback_time = 0
@@ -19,8 +31,14 @@ class PostureFeedback:
         self.consecutive_bad_posture_count = 0
         self.last_posture_good = True
         
-        # Feedback messages organized by issue type
-        self.feedback_messages = {
+        # Enhanced tracking for LLM feedback
+        self.bad_posture_start_time = None
+        self.issue_history = defaultdict(deque)  # Track recent instances of each issue
+        self.prevalent_issues = []  # Track most common issues during bad posture periods
+        self.current_metrics_buffer = deque(maxlen=60)  # Last 60 measurements for context
+        
+        # Feedback messages organized by issue type (fallback for when LLM is unavailable)
+        self.fallback_feedback_messages = {
             "Head too far forward": {
                 "corrections": [
                     "Pull your chin back and imagine a string pulling the top of your head up.",
@@ -112,15 +130,99 @@ class PostureFeedback:
             "Poor posture alert! A quick adjustment can prevent discomfort later."
         ]
     
+    def update_metrics_buffer(self, posture_metrics: PostureMetrics):
+        """Update the metrics buffer for LLM context"""
+        current_time = time.time()
+        
+        # Add current metrics to buffer
+        self.current_metrics_buffer.append({
+            'timestamp': current_time,
+            'head_angle': getattr(posture_metrics, 'head_tilt_angle', 0),
+            'spine_angle': getattr(posture_metrics, 'back_angle', 0),
+            'confidence': posture_metrics.confidence,
+            'issues': posture_metrics.issues.copy() if posture_metrics.issues else []
+        })
+        
+        # Track issue occurrences
+        if posture_metrics.issues:
+            for issue in posture_metrics.issues:
+                issue_metric = IssueMetrics(
+                    issue_name=issue,
+                    head_angle=getattr(posture_metrics, 'head_tilt_angle', 0),
+                    spine_angle=getattr(posture_metrics, 'back_angle', 0),
+                    confidence=posture_metrics.confidence,
+                    timestamp=current_time
+                )
+                self.issue_history[issue].append(issue_metric)
+                
+                # Keep only recent history (last 10 minutes)
+                while (self.issue_history[issue] and 
+                       current_time - self.issue_history[issue][0].timestamp > 600):
+                    self.issue_history[issue].popleft()
+    
+    def get_prevalent_issues(self, duration_minutes: float = 3.0) -> List[Tuple[str, List[IssueMetrics]]]:
+        """Get the most prevalent issues over the specified duration"""
+        current_time = time.time()
+        cutoff_time = current_time - (duration_minutes * 60)
+        
+        # Count recent occurrences of each issue
+        issue_counts = {}
+        issue_metrics = {}
+        
+        for issue, history in self.issue_history.items():
+            recent_metrics = [m for m in history if m.timestamp >= cutoff_time]
+            if recent_metrics:
+                issue_counts[issue] = len(recent_metrics)
+                issue_metrics[issue] = recent_metrics
+        
+        # Sort by frequency and return top 2
+        sorted_issues = sorted(issue_counts.items(), key=lambda x: x[1], reverse=True)
+        
+        result = []
+        for issue, count in sorted_issues[:2]:
+            result.append((issue, issue_metrics[issue]))
+        
+        return result
+    
+    def generate_llm_context(self, prevalent_issues: List[Tuple[str, List[IssueMetrics]]]) -> str:
+        """Generate context string for LLM"""
+        if not prevalent_issues:
+            return "No specific posture issues detected in recent history."
+        
+        context_parts = []
+        context_parts.append("The user has been experiencing the following posture issues:")
+        
+        for issue_name, metrics_list in prevalent_issues:
+            if not metrics_list:
+                continue
+                
+            # Calculate averages
+            avg_head_angle = sum(m.head_angle for m in metrics_list) / len(metrics_list)
+            avg_spine_angle = sum(m.spine_angle for m in metrics_list) / len(metrics_list)
+            avg_confidence = sum(m.confidence for m in metrics_list) / len(metrics_list)
+            
+            context_parts.append(
+                f"- {issue_name}: detected {len(metrics_list)} times in the last 3 minutes. "
+                f"Average head tilt: {avg_head_angle:.1f}°, "
+                f"Average spine angle: {avg_spine_angle:.1f}°, "
+                f"Detection confidence: {avg_confidence:.2f}"
+            )
+        
+        return "\n".join(context_parts)
+    
     def generate_feedback(self, posture_metrics: PostureMetrics, posture_score: float) -> List[FeedbackMessage]:
         """Generate appropriate feedback based on current posture"""
         current_time = time.time()
         feedback_messages = []
         
+        # Update metrics tracking
+        self.update_metrics_buffer(posture_metrics)
+        
         # Track consecutive bad posture
         if posture_score < 7:
             if self.last_posture_good:
                 self.consecutive_bad_posture_count = 1
+                self.bad_posture_start_time = current_time
             else:
                 self.consecutive_bad_posture_count += 1
             self.last_posture_good = False
@@ -134,41 +236,45 @@ class PostureFeedback:
                 ))
             self.consecutive_bad_posture_count = 0
             self.last_posture_good = True
+            self.bad_posture_start_time = None
         
-        # Generate specific corrections for detected issues
-        if posture_metrics.issues:
-            for issue in posture_metrics.issues:
-                if issue in self.feedback_messages:
-                    issue_feedback = self.feedback_messages[issue]
+        # Check if we've had bad posture for 3+ minutes - this triggers LLM feedback
+        bad_posture_duration = 0
+        if self.bad_posture_start_time:
+            bad_posture_duration = current_time - self.bad_posture_start_time
+        
+        if bad_posture_duration >= 180:  # 3 minutes
+            # Generate LLM-based feedback for sustained poor posture
+            prevalent_issues = self.get_prevalent_issues(3.0)
+            
+            if prevalent_issues:
+                # This will be handled by the speech manager with LLM integration
+                context = self.generate_llm_context(prevalent_issues)
+                feedback_messages.append(FeedbackMessage(
+                    message=f"LLM_CONTEXT:{context}",
+                    priority=5,
+                    category="llm_generated"
+                ))
+                
+                # Reset the timer to prevent continuous LLM calls
+                self.bad_posture_start_time = current_time
+            
+        # Fallback to traditional feedback for immediate issues
+        elif posture_metrics.issues:
+            for issue in posture_metrics.issues[:1]:  # Only one immediate issue
+                if issue in self.fallback_feedback_messages:
+                    issue_feedback = self.fallback_feedback_messages[issue]
                     
                     # Choose correction message
                     if "corrections" in issue_feedback:
                         correction_msg = random.choice(issue_feedback["corrections"])
-                        priority = 4 if self.consecutive_bad_posture_count > 5 else 3
+                        priority = 3 if bad_posture_duration > 60 else 2
                         
                         feedback_messages.append(FeedbackMessage(
                             message=correction_msg,
                             priority=priority,
                             category="correction"
                         ))
-                    
-                    # Add tips occasionally
-                    if "tips" in issue_feedback and random.random() < 0.3:
-                        tip_msg = random.choice(issue_feedback["tips"])
-                        feedback_messages.append(FeedbackMessage(
-                            message=tip_msg,
-                            priority=1,
-                            category="tip"
-                        ))
-        
-        # Warning for extended poor posture
-        if self.consecutive_bad_posture_count > 10:
-            warning_msg = random.choice(self.warning_messages)
-            feedback_messages.append(FeedbackMessage(
-                message=warning_msg,
-                priority=5,
-                category="warning"
-            ))
         
         # General tips occasionally when posture is good
         elif posture_score > 8 and random.random() < 0.1:
@@ -184,8 +290,8 @@ class PostureFeedback:
         
         return feedback_messages[:2]  # Return max 2 messages to avoid overwhelming
     
-    def should_give_feedback(self, min_interval: float = 15.0) -> bool:
-        """Check if enough time has passed to give new feedback"""
+    def should_give_feedback(self, min_interval: float = 180.0) -> bool:
+        """Check if enough time has passed to give new feedback (now 3 minutes)"""
         current_time = time.time()
         return (current_time - self.last_feedback_time) >= min_interval
     
@@ -226,7 +332,7 @@ class PostureFeedback:
         else:
             issue = issues[0]
         
-        if issue in self.feedback_messages and "corrections" in self.feedback_messages[issue]:
-            return random.choice(self.feedback_messages[issue]["corrections"])
+        if issue in self.fallback_feedback_messages and "corrections" in self.fallback_feedback_messages[issue]:
+            return random.choice(self.fallback_feedback_messages[issue]["corrections"])
         
         return "Please adjust your posture and sit up straight."

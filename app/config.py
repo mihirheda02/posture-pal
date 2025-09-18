@@ -49,9 +49,9 @@ class ScoringSettings:
 @dataclass
 class FeedbackSettings:
     """Feedback system settings"""
-    feedback_interval_seconds: float = 30.0
-    bad_posture_tolerance_seconds: float = 10.0
-    min_speech_interval: float = 15.0
+    feedback_interval_seconds: float = 180.0       # Changed to 3 minutes
+    bad_posture_tolerance_seconds: float = 180.0   # Changed to 3 minutes 
+    min_speech_interval: float = 60.0              # 1 minute minimum between speech
     max_feedback_messages: int = 2
     encouragement_probability: float = 0.3
     tip_probability: float = 0.1
@@ -89,7 +89,7 @@ class AppConfig:
     
     # Azure credentials (loaded from environment)
     azure_speech_key: Optional[str] = None
-    azure_speech_region: Optional[str] = None
+    azure_speech_endpoint: Optional[str] = None
     
     # Model path
     model_path: str = "models/pose_landmarker_heavy.task"
@@ -140,7 +140,7 @@ class ConfigManager:
         """Load configuration from environment variables"""
         env_mappings = {
             'AZURE_SPEECH_KEY': ('azure_speech_key', str),
-            'AZURE_SPEECH_REGION': ('azure_speech_region', str),
+            'AZURE_SPEECH_ENDPOINT': ('azure_speech_endpoint', str),
             'FEEDBACK_INTERVAL_SECONDS': ('feedback_settings.feedback_interval_seconds', float),
             'POSTURE_CONFIDENCE_THRESHOLD': ('posture_thresholds.pose_confidence_threshold', float),
             'BAD_POSTURE_TOLERANCE_SECONDS': ('feedback_settings.bad_posture_tolerance_seconds', float),
@@ -239,7 +239,7 @@ class ConfigManager:
                     setattr(config.speech_settings, key, value)
         
         # Update main config
-        for key in ['azure_speech_key', 'azure_speech_region', 'model_path', 'debug_mode', 'log_level']:
+        for key in ['azure_speech_key', 'azure_speech_endpoint', 'model_path', 'debug_mode', 'log_level']:
             if key in config_dict:
                 setattr(config, key, config_dict[key])
         

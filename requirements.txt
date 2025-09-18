@@ -1,6 +1,7 @@
 mediapipe==0.10.21
-opencv-python==4.8.1.78
-numpy==1.24.3
-azure-cognitiveservices-speech==1.40.0
-python-dotenv==1.0.0
-scipy==1.11.4
+opencv-python==4.11.0.86
+numpy==1.26.4
+azure-cognitiveservices-speech==1.46.0
+python-dotenv==1.1.1
+scipy==1.16.2
+openai==1.108.0

@@ -4,13 +4,14 @@ import time
 import os
 import logging
 from dotenv import load_dotenv
-from typing import Optional
 import signal
 import sys
 
+from config import load_config
 from posture import PostureAnalyzer
-from feedback import PostureFeedbackSystem
+from feedback import PostureFeedback
 from speech import create_speech_service, PostureSpeechManager
+from llm_feedback import create_llm_feedback_generator
 
 
 class PosturePalApp:
@@ -30,13 +31,14 @@ class PosturePalApp:
         self.feedback_system = None
         self.speech_service = None
         self.speech_manager = None
+        self.llm_feedback_generator = None
         self.camera = None
         self.running = False
         
         # Configuration
-        self.feedback_interval = float(os.getenv('FEEDBACK_INTERVAL_SECONDS', '30'))
+        self.feedback_interval = float(os.getenv('FEEDBACK_INTERVAL_SECONDS', '180'))  # 3 minutes
         self.confidence_threshold = float(os.getenv('POSTURE_CONFIDENCE_THRESHOLD', '0.7'))
-        self.bad_posture_tolerance = float(os.getenv('BAD_POSTURE_TOLERANCE_SECONDS', '10'))
+        self.bad_posture_tolerance = float(os.getenv('BAD_POSTURE_TOLERANCE_SECONDS', '180'))  # 3 minutes
         
         # UI settings
         self.window_name = "Posture Pal - Real-time Monitoring"
@@ -64,18 +66,31 @@ class PosturePalApp:
         self.logger.info("Initializing Posture Pal...")
         
         try:
+            # Load configuration
+            self.config = load_config()
+
             # Initialize posture analyzer
-            self.posture_analyzer = PostureAnalyzer()
+            self.posture_analyzer = PostureAnalyzer(config=self.config)
             self.logger.info("Posture analyzer initialized")
             
             # Initialize feedback system
-            self.feedback_system = PostureFeedbackSystem()
+            self.feedback_system = PostureFeedback()
             self.logger.info("Feedback system initialized")
+            
+            # Initialize LLM feedback generator (optional)
+            self.llm_feedback_generator = create_llm_feedback_generator()
+            if self.llm_feedback_generator:
+                self.logger.info("LLM feedback generator initialized")
+            else:
+                self.logger.warning("LLM feedback generator not available - using fallback messages")
             
             # Initialize speech service
             self.speech_service = create_speech_service()
             if self.speech_service:
-                self.speech_manager = PostureSpeechManager(self.speech_service)
+                self.speech_manager = PostureSpeechManager(
+                    self.speech_service, 
+                    self.llm_feedback_generator
+                )
                 self.logger.info("Speech service initialized")
             else:
                 self.logger.warning("Speech service not available - continuing without voice feedback")
@@ -94,9 +109,12 @@ class PosturePalApp:
             
             # Welcome message
             if self.speech_manager:
+                welcome_msg = "Welcome to Posture Pal! I'll help you maintain good posture throughout your day."
+                if self.llm_feedback_generator:
+                    welcome_msg += " I'm powered by AI to give you personalized feedback."
                 self.speech_manager.speak_posture_feedback(
-                    "Welcome to Posture Pal! I'll help you maintain good posture throughout your day.", 
-                    priority=1, 
+                    welcome_msg, 
+                    priority=5, 
                     force=True
                 )
             
@@ -112,12 +130,14 @@ class PosturePalApp:
         overlay = frame.copy()
         
         # Create semi-transparent background for text
-        cv2.rectangle(overlay, (10, 10), (w-10, 120), (0, 0, 0), -1)
+        cv2.rectangle(overlay, (10, 10), (w-10, 140), (0, 0, 0), -1)
         cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
         
         # Posture score
-        score_color = (0, 255, 0) if posture_score >= 80 else (0, 255, 255) if posture_score >= 60 else (0, 0, 255)
-        cv2.putText(frame, f"Posture Score: {posture_score:.1f}/100", (20, 35), 
+        max_score = self.config.scoring_settings.max_score
+        good_threshold = self.config.scoring_settings.bad_posture_threshold
+        score_color = (0, 255, 0) if posture_score >= good_threshold else (0, 255, 255) if posture_score >= good_threshold * 0.7 else (0, 0, 255)
+        cv2.putText(frame, f"Posture Score: {posture_score:.1f}/{max_score:.0f}", (20, 35), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, score_color, 2)
         
         # Status
@@ -130,6 +150,12 @@ class PosturePalApp:
             issues_text = f"Issues: {', '.join(issues[:2])}"  # Show max 2 issues
             cv2.putText(frame, issues_text, (20, 95), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+        
+        # LLM status
+        llm_status = "AI Feedback: ON" if self.llm_feedback_generator else "AI Feedback: OFF"
+        llm_color = (0, 255, 0) if self.llm_feedback_generator else (0, 255, 255)
+        cv2.putText(frame, llm_status, (20, 125), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, llm_color, 2)
         
         # Session info
         session_time = int(time.time() - self.session_start_time)
@@ -148,7 +174,7 @@ class PosturePalApp:
         metrics = self.posture_analyzer.analyze_frame(frame)
         
         if metrics is None or metrics.confidence < self.confidence_threshold:
-            return None, 50, []
+            return None, 5, ["No pose detected"]
         
         # Get posture score and issues
         posture_score = self.posture_analyzer.get_posture_score()
@@ -163,7 +189,7 @@ class PosturePalApp:
         # Generate feedback messages
         feedback_messages = self.feedback_system.generate_feedback(metrics, posture_score)
         
-        # Check if we should give feedback
+        # Check if we should give feedback (now 3 minutes interval)
         if self.feedback_system.should_give_feedback(self.feedback_interval):
             if feedback_messages and self.speech_manager:
                 # Speak the highest priority message
@@ -174,10 +200,10 @@ class PosturePalApp:
                 )
                 self.feedback_system.mark_feedback_given()
         
-        # Handle urgent feedback (high priority, immediate)
-        urgent_messages = [msg for msg in feedback_messages if msg.priority >= 4]
-        if urgent_messages and self.speech_manager:
-            for msg in urgent_messages[:1]:  # Only one urgent message at a time
+        # Handle LLM feedback (priority 5 messages containing "LLM_CONTEXT:")
+        llm_messages = [msg for msg in feedback_messages if msg.priority >= 5 and msg.category == "llm_generated"]
+        if llm_messages and self.speech_manager:
+            for msg in llm_messages[:1]:  # Only one LLM message at a time
                 self.speech_manager.speak_posture_feedback(
                     msg.message, 
                     priority=msg.priority, 
@@ -216,10 +242,6 @@ class PosturePalApp:
                     
                     # Handle feedback
                     self._handle_feedback(metrics, posture_score, issues)
-                else:
-                    # No pose detected
-                    posture_score = 50
-                    issues = ["No pose detected"]
                 
                 # Draw UI overlay
                 frame = self._draw_ui_overlay(frame, posture_score, issues)
@@ -284,8 +306,9 @@ def main():
     print("Features:")
     print("• Real-time posture analysis using MediaPipe")
     print("• Intelligent feedback with Azure AI Speech")
-    print("• Personalized posture improvement suggestions")
+    print("• AI-powered personalized posture suggestions")
     print("• Visual posture score and issue detection")
+    print("• 3-minute sustained bad posture detection")
     print("\nControls:")
     print("• 'q' - Quit application")
     print("• 's' - Speak current status")
