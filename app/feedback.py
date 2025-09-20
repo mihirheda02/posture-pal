@@ -160,10 +160,12 @@ class PostureFeedback:
                        current_time - self.issue_history[issue][0].timestamp > 600):
                     self.issue_history[issue].popleft()
     
-    def get_prevalent_issues(self, duration_minutes: float = 3.0) -> List[Tuple[str, List[IssueMetrics]]]:
+    def get_prevalent_issues(self, duration_minutes: float = 0.5) -> List[Tuple[str, List[IssueMetrics]]]:
         """Get the most prevalent issues over the specified duration"""
         current_time = time.time()
         cutoff_time = current_time - (duration_minutes * 60)
+        
+        logging.debug(f"Looking for issues in last {duration_minutes} minutes (cutoff: {cutoff_time})")
         
         # Count recent occurrences of each issue
         issue_counts = {}
@@ -174,9 +176,11 @@ class PostureFeedback:
             if recent_metrics:
                 issue_counts[issue] = len(recent_metrics)
                 issue_metrics[issue] = recent_metrics
+                logging.debug(f"Issue '{issue}': {len(recent_metrics)} recent occurrences")
         
         # Sort by frequency and return top 2
         sorted_issues = sorted(issue_counts.items(), key=lambda x: x[1], reverse=True)
+        logging.debug(f"Sorted issues by frequency: {sorted_issues}")
         
         result = []
         for issue, count in sorted_issues[:2]:
@@ -187,6 +191,7 @@ class PostureFeedback:
     def generate_llm_context(self, prevalent_issues: List[Tuple[str, List[IssueMetrics]]]) -> str:
         """Generate context string for LLM"""
         if not prevalent_issues:
+            logging.warning("No prevalent issues to generate LLM context")
             return "No specific posture issues detected in recent history."
         
         context_parts = []
@@ -202,13 +207,15 @@ class PostureFeedback:
             avg_confidence = sum(m.confidence for m in metrics_list) / len(metrics_list)
             
             context_parts.append(
-                f"- {issue_name}: detected {len(metrics_list)} times in the last 3 minutes. "
+                f"- {issue_name}: detected {len(metrics_list)} times in the last 10 seconds. "
                 f"Average head tilt: {avg_head_angle:.1f}°, "
                 f"Average spine angle: {avg_spine_angle:.1f}°, "
                 f"Detection confidence: {avg_confidence:.2f}"
             )
         
-        return "\n".join(context_parts)
+        context = "\n".join(context_parts)
+        logging.info(f"Generated LLM context with {len(prevalent_issues)} issues: {context}")
+        return context
     
     def generate_feedback(self, posture_metrics: PostureMetrics, posture_score: float) -> List[FeedbackMessage]:
         """Generate appropriate feedback based on current posture"""
@@ -238,18 +245,26 @@ class PostureFeedback:
             self.last_posture_good = True
             self.bad_posture_start_time = None
         
-        # Check if we've had bad posture for 3+ minutes - this triggers LLM feedback
+        # Check if we've had bad posture for 10 seconds - this triggers LLM feedback
         bad_posture_duration = 0
         if self.bad_posture_start_time:
             bad_posture_duration = current_time - self.bad_posture_start_time
         
-        if bad_posture_duration >= 180:  # 3 minutes
+        logging.info(f"Bad posture duration: {bad_posture_duration:.1f}s, Score: {posture_score:.1f}, Issues: {posture_metrics.issues}")
+
+        if bad_posture_duration >= 10:  # 10 seconds for testing
             # Generate LLM-based feedback for sustained poor posture
-            prevalent_issues = self.get_prevalent_issues(3.0)
+            prevalent_issues = self.get_prevalent_issues(0.2)  # Last 12 seconds
+            
+            logging.info(f"Sustained bad posture detected! Duration: {bad_posture_duration:.1f}s")
+            logging.info(f"Prevalent issues found: {len(prevalent_issues)}")
+            for issue_name, metrics_list in prevalent_issues:
+                logging.info(f"  - {issue_name}: {len(metrics_list)} occurrences")
             
             if prevalent_issues:
                 # This will be handled by the speech manager with LLM integration
                 context = self.generate_llm_context(prevalent_issues)
+                logging.info(f"Generated LLM context: {context}")
                 feedback_messages.append(FeedbackMessage(
                     message=f"LLM_CONTEXT:{context}",
                     priority=5,
@@ -258,8 +273,9 @@ class PostureFeedback:
                 
                 # Reset the timer to prevent continuous LLM calls
                 self.bad_posture_start_time = current_time
-            
-        # Fallback to traditional feedback for immediate issues
+                logging.info("LLM feedback message created and timer reset")
+            else:
+                logging.warning("No prevalent issues found despite sustained bad posture")        # Fallback to traditional feedback for immediate issues
         elif posture_metrics.issues:
             for issue in posture_metrics.issues[:1]:  # Only one immediate issue
                 if issue in self.fallback_feedback_messages:

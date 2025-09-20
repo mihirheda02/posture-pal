@@ -80,9 +80,13 @@ class PosturePalApp:
             # Initialize LLM feedback generator (optional)
             self.llm_feedback_generator = create_llm_feedback_generator()
             if self.llm_feedback_generator:
-                self.logger.info("LLM feedback generator initialized")
+                self.logger.info("✅ LLM feedback generator initialized successfully")
             else:
-                self.logger.warning("LLM feedback generator not available - using fallback messages")
+                self.logger.warning("❌ LLM feedback generator not available - check Azure OpenAI credentials in .env file")
+                self.logger.info("To enable AI feedback, add these to your .env file:")
+                self.logger.info("AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/")
+                self.logger.info("AZURE_OPENAI_KEY=your-api-key")
+                self.logger.info("AZURE_OPENAI_MODEL=gpt-4")
             
             # Initialize speech service
             self.speech_service = create_speech_service()
@@ -203,7 +207,9 @@ class PosturePalApp:
         # Handle LLM feedback (priority 5 messages containing "LLM_CONTEXT:")
         llm_messages = [msg for msg in feedback_messages if msg.priority >= 5 and msg.category == "llm_generated"]
         if llm_messages and self.speech_manager:
+            self.logger.info(f"🤖 Triggering LLM feedback: {len(llm_messages)} messages found")
             for msg in llm_messages[:1]:  # Only one LLM message at a time
+                self.logger.info(f"🎯 Processing LLM message: {msg.message[:50]}...")
                 self.speech_manager.speak_posture_feedback(
                     msg.message, 
                     priority=msg.priority, 

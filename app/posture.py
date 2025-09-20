@@ -72,6 +72,13 @@ class PostureAnalyzer:
         """Analyze head posture"""
         issues = []
         
+        # Check if required landmarks are visible
+        if (len(landmarks) <= 11 or 
+            landmarks[7].visibility < 0.2 or 
+            landmarks[11].visibility < 0.2 or 
+            landmarks[0].visibility < 0.2):
+            return 0.0, 0.0, []  # Return neutral values if landmarks not visible
+        
         left_ear = (landmarks[7].x, landmarks[7].y)
         left_shoulder = (landmarks[11].x, landmarks[11].y)
         nose = (landmarks[0].x, landmarks[0].y)
@@ -102,6 +109,12 @@ class PostureAnalyzer:
     def _analyze_back_straightness(self, landmarks) -> Tuple[float, List[str]]:
         """Analyze back straightness"""
         issues = []
+        
+        # Check if required landmarks are visible
+        if (len(landmarks) <= 24 or 
+            landmarks[11].visibility < 0.2 or 
+            landmarks[23].visibility < 0.2):
+            return 0.0, []  # Return neutral values if landmarks not visible
         
         left_shoulder = (landmarks[11].x, landmarks[11].y)
         left_hip = (landmarks[23].x, landmarks[23].y)
@@ -150,9 +163,14 @@ class PostureAnalyzer:
             
         landmarks = self._latest_result.pose_landmarks[0]
         
-        # Check if we have enough visible landmarks
-        visible_landmarks = sum(1 for lm in landmarks if lm.visibility > 0.4)
-        if visible_landmarks < 8:  # Lowered for better detection
+        # Check if we have enough visible landmarks - made more lenient
+        # Key landmarks we need: nose(0), ears(7,8), shoulders(11,12), hips(23,24)
+        key_landmarks = [0, 7, 8, 11, 12, 23, 24]
+        visible_key_landmarks = sum(1 for idx in key_landmarks 
+                                  if idx < len(landmarks) and landmarks[idx].visibility > 0.2)
+        
+        # Need at least 5 of the 7 key landmarks visible (more lenient)
+        if visible_key_landmarks < 5:
             return None
         
         # Calculate posture metrics
@@ -162,8 +180,8 @@ class PostureAnalyzer:
         # Combine all issues
         all_issues = head_issues + back_issues
         
-        # Calculate overall confidence (based on landmark visibility)
-        confidence = visible_landmarks / len(landmarks)  # Use consistent threshold
+        # Calculate overall confidence (based on key landmark visibility)
+        confidence = visible_key_landmarks / len(key_landmarks)
         
         metrics = PostureMetrics(
             head_forward_angle=head_forward_angle,
@@ -274,15 +292,15 @@ class PostureAnalyzer:
                 start_lm = landmarks[start_idx]
                 end_lm = landmarks[end_idx]
                 
-                # Only draw if both landmarks are visible
-                if start_lm.visibility > 0.3 and end_lm.visibility > 0.3:
+                # Only draw if both landmarks are visible (lowered threshold)
+                if start_lm.visibility > 0.2 and end_lm.visibility > 0.2:
                     start_x, start_y = int(start_lm.x * w), int(start_lm.y * h)
                     end_x, end_y = int(end_lm.x * w), int(end_lm.y * h)
                     cv2.line(frame, (start_x, start_y), (end_x, end_y), (0, 255, 0), 2)
         
         # Draw landmarks on top
         for i, lm in enumerate(landmarks):
-            if lm.visibility > 0.3:
+            if lm.visibility > 0.2:  # Lowered visibility threshold for drawing
                 x, y = int(lm.x * w), int(lm.y * h)
                 # Different colors for different body parts
                 if i in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]:  # Face

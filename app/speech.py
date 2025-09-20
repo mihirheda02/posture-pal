@@ -221,21 +221,26 @@ class PostureSpeechManager:
     
     def _handle_llm_feedback(self, context: str, priority: int, force: bool):
         """Handle LLM-generated feedback"""
+        logging.info(f"Handling LLM feedback request with context: {context[:100]}...")
+        
         if not self.llm_feedback_generator:
+            logging.warning("LLM feedback generator not available - using fallback message")
             # Fallback to generic message if LLM is not available
-            fallback_message = "You've been in poor posture for a few minutes. Let's take a moment to reset - sit back in your chair, roll your shoulders back, and align your head over your shoulders."
+            fallback_message = "You've been in poor posture for a while. Let's take a moment to reset - sit back in your chair, roll your shoulders back, and align your head over your shoulders."
             self.speak_posture_feedback(fallback_message, priority=5, force=True)
             return
         
         try:
+            logging.info("Generating LLM feedback...")
             # Generate LLM feedback
             llm_response = self.llm_feedback_generator.generate_posture_feedback(context)
             
             if llm_response:
                 # Speak the LLM-generated feedback with high priority
+                logging.info(f"✅ LLM feedback generated successfully: {llm_response}")
                 self.speak_posture_feedback(llm_response, priority=5, force=True)
-                logging.info(f"LLM feedback delivered: {llm_response}")
             else:
+                logging.warning("LLM returned empty response - using fallback")
                 # Fallback if LLM fails
                 fallback_message = "Time for a posture check! Let's reset your position and get back to good alignment."
                 self.speak_posture_feedback(fallback_message, priority=5, force=True)

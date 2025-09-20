@@ -9,10 +9,10 @@ import logging
 class PostureThresholds:
     """Posture detection thresholds"""
     # MediaPipe confidence thresholds (standardized)
-    pose_detection_confidence: float = 0.5      # Pose detection confidence
-    pose_presence_confidence: float = 0.5       # Pose presence confidence  
-    pose_tracking_confidence: float = 0.5       # Pose tracking confidence
-    pose_confidence_threshold: float = 0.6      # Minimum confidence for scoring
+    pose_detection_confidence: float = 0.4      # Pose detection confidence
+    pose_presence_confidence: float = 0.4       # Pose presence confidence  
+    pose_tracking_confidence: float = 0.4       # Pose tracking confidence
+    pose_confidence_threshold: float = 0.4      # Minimum confidence for scoring
     
     # Head tilt thresholds (degrees) - only major thresholds
     head_tilt_forward_threshold: float = 40.0   # Forward tilt threshold

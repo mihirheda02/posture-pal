@@ -1,7 +1,15 @@
 import os
 import logging
 from typing import Optional
-from openai import OpenAI
+
+# Try to import openai, but make it optional
+try:
+    from openai import OpenAI
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
+    logging.warning("OpenAI package not installed. LLM feedback will be disabled.")
+
 import time
 
 class LLMFeedbackGenerator:
@@ -9,7 +17,7 @@ class LLMFeedbackGenerator:
     
     def __init__(self):
         self.client = None
-        self.model_name = "gpt-4.1"  # Default model name
+        self.model_name = "gpt-4"  # Default model name
         self.last_request_time = 0
         self.rate_limit_interval = 30  # Minimum 30 seconds between requests
         self.logger = logging.getLogger(__name__)
@@ -19,23 +27,47 @@ class LLMFeedbackGenerator:
         
     def _initialize_client(self) -> bool:
         """Initialize Azure OpenAI client"""
+        if not OPENAI_AVAILABLE:
+            self.logger.warning("OpenAI package not available. Install with: pip install openai")
+            return False
+            
         try:
             # Get credentials from environment
             azure_endpoint = os.getenv('AZURE_OPENAI_ENDPOINT')
             azure_key = os.getenv('AZURE_OPENAI_KEY')
-            model_name = os.getenv('AZURE_OPENAI_MODEL', 'gpt-4.1')
+            model_name = os.getenv('AZURE_OPENAI_MODEL', 'gpt-4')
+            
+            self.logger.info(f"Checking Azure OpenAI credentials...")
+            self.logger.info(f"Endpoint: {'✅ Set' if azure_endpoint else '❌ Missing'}")
+            self.logger.info(f"API Key: {'✅ Set' if azure_key else '❌ Missing'}")
+            self.logger.info(f"Model: {model_name}")
             
             if not azure_endpoint or not azure_key:
                 self.logger.warning("Azure OpenAI credentials not found. LLM feedback will be disabled.")
                 return False
             
-            self.client = OpenAI(
-                api_key=azure_key,
-                base_url=azure_endpoint
-            )
+            # For Azure OpenAI, use the correct base URL format
+            if 'openai.azure.com' in azure_endpoint:
+                # Extract resource name from the endpoint
+                # Format: https://posture-pal-azure-openai.openai.azure.com/
+                resource_name = azure_endpoint.split('.')[0].replace('https://', '')
+                base_url = f"https://{resource_name}.openai.azure.com/openai/v1/"
+                
+                self.logger.info(f"Using Azure OpenAI base URL: {base_url}")
+                
+                self.client = OpenAI(
+                    api_key=azure_key,
+                    base_url=base_url
+                )
+            else:
+                # Regular OpenAI format (fallback)
+                self.client = OpenAI(
+                    api_key=azure_key,
+                    base_url=azure_endpoint
+                )
             
             self.model_name = model_name
-            self.logger.info("Azure OpenAI client initialized successfully")
+            self.logger.info("✅ Azure OpenAI client initialized successfully")
             return True
             
         except Exception as e:
@@ -49,16 +81,19 @@ class LLMFeedbackGenerator:
     
     def generate_posture_feedback(self, context: str) -> Optional[str]:
         """Generate intelligent posture feedback based on context"""
+        self.logger.info(f"🤖 LLM feedback request received. Context: {context[:100]}...")
+        
         if not self.client:
-            self.logger.warning("Azure OpenAI client not available")
+            self.logger.warning("❌ Azure OpenAI client not available")
             return None
             
         if self._is_rate_limited():
-            self.logger.debug("Rate limited - skipping LLM request")
+            self.logger.debug("⏱️ Rate limited - skipping LLM request")
             return None
         
         try:
             prompt = self._create_posture_prompt(context)
+            self.logger.info(f"📝 Sending prompt to Azure OpenAI: {prompt[:150]}...")
             
             response = self.client.chat.completions.create(
                 model=self.model_name,
@@ -95,19 +130,19 @@ class LLMFeedbackGenerator:
             
             if response.choices and response.choices[0].message:
                 feedback = response.choices[0].message.content.strip()
-                self.logger.info(f"Generated LLM feedback: {feedback}")
+                self.logger.info(f"✅ LLM feedback generated successfully: {feedback}")
                 return feedback
             else:
-                self.logger.warning("No response content from Azure OpenAI")
+                self.logger.warning("❌ No response content from Azure OpenAI")
                 return None
                 
         except Exception as e:
-            self.logger.error(f"Error generating LLM feedback: {e}")
+            self.logger.error(f"❌ Error generating LLM feedback: {e}")
             return None
     
     def _create_posture_prompt(self, context: str) -> str:
         """Create a prompt for the LLM based on posture context"""
-        base_prompt = f"""The user has been maintaining poor posture for about 3 minutes. Here's what I detected:
+        base_prompt = f"""The user has been maintaining poor posture for about 10 seconds. Here's what I detected:
 
 {context}
 
